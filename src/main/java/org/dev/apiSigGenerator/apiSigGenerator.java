@@ -26,6 +26,7 @@ public class apiSigGenerator {
         long time = Instant.now().getEpochSecond();
 
         TreeMap<String, String> sortedParams = new TreeMap<>(params);
+        System.out.println(sortedParams);
         sortedParams.put("apiKey", apiKey);
         sortedParams.put("time", String.valueOf(time));
 

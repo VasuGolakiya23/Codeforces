@@ -1,24 +1,21 @@
 package org.dev.proxies;
 
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.ws.rs.GET;
-import jakarta.ws.rs.Path;
-import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import org.dev.Entity.UserInfoResponse;
+import org.dev.Entity.BlogEntryResponse;
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
 
 @RegisterRestClient(baseUri = "https://codeforces.com/api")
 @ApplicationScoped
-public interface getUserInfo {
+public interface getUserBlogs {
 
     @GET
-    @Path("/user.info")
+    @Path("/user.blogEntries")
     @Produces(MediaType.APPLICATION_JSON)
-    UserInfoResponse getUserInfoAPI(
-            @QueryParam("handles") String handles,
+    BlogEntryResponse getUserBlogsAPI(
+            @QueryParam("handle") String handle,
             @QueryParam("apiKey") String apiKey,
             @QueryParam("time") long time,
             @QueryParam("apiSig") String apiSig

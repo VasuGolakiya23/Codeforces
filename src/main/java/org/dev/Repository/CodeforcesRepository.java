@@ -16,9 +16,9 @@ import org.bson.codecs.configuration.CodecProvider;
 import org.bson.codecs.configuration.CodecRegistry;
 import org.bson.codecs.pojo.PojoCodecProvider;
 import org.bson.conversions.Bson;
+import org.dev.Entity.BlogEntry;
 import org.dev.Entity.UserInfo;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import redis.clients.jedis.search.Document;
 
 import static com.mongodb.MongoClientSettings.getDefaultCodecRegistry;
 import static org.bson.codecs.configuration.CodecRegistries.fromProviders;
@@ -26,7 +26,8 @@ import static org.bson.codecs.configuration.CodecRegistries.fromRegistries;
 
 @ApplicationScoped
 public class CodeforcesRepository {
-    private MongoCollection<UserInfo> codeforcesCollection;
+    private MongoCollection<UserInfo> userInfoCollection;
+    private MongoCollection<BlogEntry> blogEntryCollection;
     private MongoClient mongoClient;
 
     @ConfigProperty(name = "quarkus.mongodb.connection-string")
@@ -35,9 +36,13 @@ public class CodeforcesRepository {
     public void init(@Observes StartupEvent ev) {
         CodecProvider pojoCodecProvider = PojoCodecProvider.builder().automatic(true).build();
         CodecRegistry pojoCodecRegistry = fromRegistries(getDefaultCodecRegistry(), fromProviders(pojoCodecProvider));
+
         this.mongoClient = MongoClients.create(uri);
         MongoDatabase database = mongoClient.getDatabase("codeforces").withCodecRegistry(pojoCodecRegistry);
-        this.codeforcesCollection=database.getCollection("codeforces", UserInfo.class);
+
+        this.userInfoCollection = database.getCollection("user_info", UserInfo.class);
+        this.blogEntryCollection = database.getCollection("blog_entries", BlogEntry.class);
+
         if(!isConnected(database)){
             System.out.println("Failed to connect to database");
         }
@@ -57,15 +62,25 @@ public class CodeforcesRepository {
     }
 
     public void close(@Observes ShutdownEvent ev){
-        System.out.println("Disconnecting from MongoClient");
+        System.out.println("Disconnecting from MongoDB...");
         mongoClient.close();
     }
 
     public void addUserInfo(UserInfo userInfo) {
-        codeforcesCollection.insertOne(userInfo);
+        userInfoCollection.insertOne(userInfo);
+        System.out.println("Inserted UserInfo in MongoDB: " + userInfo.getHandle());
     }
 
-    public boolean userExists(String handle) {
-        return codeforcesCollection.find(Filters.eq("handle", handle)).first() != null;
+    public void addBlogEntry(BlogEntry blogEntry) {
+        blogEntryCollection.insertOne(blogEntry);
+        System.out.println("Inserted BlogEntry in MongoDB: " + blogEntry.getAuthorHandle());
+    }
+
+    public boolean userInfoExists(String handle) {
+        return userInfoCollection.find(Filters.eq("handle", handle)).first() != null;
+    }
+
+    public boolean blogEntriesExists(String blogId) {
+        return blogEntryCollection.find(Filters.eq("blogId", blogId)).first() != null;
     }
 }
