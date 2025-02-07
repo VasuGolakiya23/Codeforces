@@ -25,7 +25,7 @@ public class openSearchClient {
                         new HttpHost(host, port, "http")
                 )
         );
-        System.out.println("Connected to OpenSearchClient...");
+        System.out.println("Connected to OpenSearchClient");
     }
 
     public RestHighLevelClient getClient(){

@@ -14,7 +14,7 @@ public class RedisService {
     RedisClient redisClient;
 
     public void init(@Observes StartupEvent ev){
-        System.out.println("Checking connection to Redis");
+        System.out.println("Checking connection to Redis...");
         System.out.println(redisClient.ping(List.of("Pinging redis service")));
     }
 

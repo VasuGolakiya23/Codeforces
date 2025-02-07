@@ -34,6 +34,7 @@ public class CodeforcesRepository {
     String uri;
 
     public void init(@Observes StartupEvent ev) {
+        System.out.println("Connecting to database...");
         CodecProvider pojoCodecProvider = PojoCodecProvider.builder().automatic(true).build();
         CodecRegistry pojoCodecRegistry = fromRegistries(getDefaultCodecRegistry(), fromProviders(pojoCodecProvider));
 
