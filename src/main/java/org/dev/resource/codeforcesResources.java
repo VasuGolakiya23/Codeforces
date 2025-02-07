@@ -1,11 +1,15 @@
 package org.dev.resource;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.dev.Entity.BlogEntry;
 import org.dev.Entity.BlogEntryResponse;
 import org.dev.Entity.UserInfo;
 import org.dev.Entity.UserInfoResponse;
@@ -16,8 +20,11 @@ import org.dev.apiSigGenerator.apiSigGenerator;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.dev.service.kafkaProducer;
+import org.dev.openSearch.openSearchService;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @ApplicationScoped
@@ -41,6 +48,7 @@ public class codeforcesResources {
 
     @GET
     @Path("user-info/{handles}")
+    @Consumes(MediaType.APPLICATION_JSON)
     public Response fetchUserInfo(@PathParam("handles") String handles) {
         long time = System.currentTimeMillis() / 1000;
         Map<String, String> params = new HashMap<>();
@@ -52,7 +60,6 @@ public class codeforcesResources {
             UserInfoResponse userInfoResp = getUserInfoProxy.getUserInfoAPI(handles, apiKey, time, apiSig);
             System.out.println(userInfoResp);
             userInfoResp.getResult().forEach(user -> {
-
                 if(codeforcesRepository.userInfoExists(user.getHandle())) {
                     System.out.println("User already exists in the database: " + user.getHandle());
                 }
@@ -74,6 +81,7 @@ public class codeforcesResources {
 
     @GET
     @Path("user-blogs/{handle}")
+    @Consumes(MediaType.APPLICATION_JSON)
     public Response fetchUserBlogs(@PathParam("handle") String handle) {
         long time = System.currentTimeMillis() / 1000;
         Map<String, String> params = new HashMap<>();
@@ -97,6 +105,59 @@ public class codeforcesResources {
             return Response.ok(blogEntryResp).build();
         } catch (Exception e) {
             throw new RuntimeException("Failed to fetch user blogs: " + e.getMessage());
+        }
+    }
+
+    @Inject
+    ObjectMapper objectmapper;
+
+    @Inject
+    openSearchService serviceClientUserInfo;
+
+    @GET
+    @Path("/searchOnUserInfo/{query}")
+    @Consumes(MediaType.APPLICATION_JSON)
+    public Response searchOnUserInfo(@PathParam("query") String query){
+        List<UserInfo> finalData = new ArrayList<>();
+        try {
+            List<String> openSearchResult = serviceClientUserInfo.searchQueryUserInfo(query);
+            openSearchResult.forEach(child->{
+                try {
+                    UserInfo data = objectmapper.readValue(child, UserInfo.class);
+                    finalData.add(data);
+                }
+                catch (Exception e) {
+                    throw new RuntimeException("Failed to search user info data", e);
+                }
+            });
+            return Response.ok(finalData).build();
+        } catch (Exception e) {
+            return Response.ok("Error in searching the user info query: " + e.getMessage()).build();
+        }
+    }
+
+    @Inject
+    openSearchService serviceClientBlogEntry;
+
+    @GET
+    @Path("/searchOnBlogEntry/{query}")
+    @Consumes(MediaType.APPLICATION_JSON)
+    public Response searchOnBlogEntry(@PathParam("query") String query){
+        List<BlogEntry> finalData = new ArrayList<>();
+        try {
+            List<String> openSearchResult = serviceClientBlogEntry.searchQueryBlogEntry(query);
+            openSearchResult.forEach(child->{
+                try {
+                    BlogEntry data = objectmapper.readValue(child, BlogEntry.class);
+                    finalData.add(data);
+                }
+                catch (Exception e) {
+                    throw new RuntimeException("Failed to search blog entry data", e);
+                }
+            });
+            return Response.ok(finalData).build();
+        } catch (Exception e) {
+            return Response.ok("Error in searching the blog entry query: " + e.getMessage()).build();
         }
     }
 }

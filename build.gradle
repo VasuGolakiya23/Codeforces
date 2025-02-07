@@ -31,6 +31,10 @@ dependencies {
     testImplementation 'io.quarkus:quarkus-junit5'
     testImplementation 'io.quarkus:quarkus-junit5-mockito'
     testImplementation 'io.rest-assured:rest-assured'
+    implementation ('org.opensearch.client:opensearch-rest-high-level-client:2.18.0')
+            {
+                exclude group: "org.apache.logging.log4j", module: "log4j-core"
+            }
 }
 
 group 'com.example'

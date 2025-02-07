@@ -8,8 +8,10 @@ import jakarta.transaction.Transactional;
 import org.dev.Entity.BlogEntry;
 import org.dev.Entity.UserInfo;
 import org.dev.Repository.CodeforcesRepository;
+import org.dev.openSearch.openSearchClient;
 import org.eclipse.microprofile.reactive.messaging.Incoming;
 import org.apache.kafka.common.TopicPartition;
+import org.dev.openSearch.openSearchService;
 
 import java.util.concurrent.CompletionStage;
 
@@ -20,6 +22,12 @@ public class kafkaConsumer {
 
     @Inject
     RedisService redisService;
+
+    @Inject
+    openSearchClient openSearchClient;
+
+    @Inject
+    openSearchService openSearchService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -32,6 +40,7 @@ public class kafkaConsumer {
             UserInfo deserialisedMessage = objectMapper.readValue(value, UserInfo.class);
             String handleName=deserialisedMessage.getHandle();
             codeforcesRepository.addUserInfo(deserialisedMessage);
+            openSearchService.createIndexUserInfo(deserialisedMessage);
             TopicPartition partition = new TopicPartition(record.getTopic(), record.getPartition());
             updateProcessedOffset(partition, record.getOffset());
             return record.ack().thenRun(() -> {
@@ -51,7 +60,10 @@ public class kafkaConsumer {
             String value = record.getPayload();
             BlogEntry deserializedMessage = objectMapper.readValue(value, BlogEntry.class);
             String blogTitle = deserializedMessage.getTitle();
+            System.out.println("deserializedMessage: ");
+            System.out.println(deserializedMessage.getId());
             codeforcesRepository.addBlogEntry(deserializedMessage);
+            openSearchService.createIndexBlogEntry(deserializedMessage);
             TopicPartition partition = new TopicPartition(record.getTopic(), record.getPartition());
             updateProcessedOffset(partition, record.getOffset());
             return record.ack().thenRun(() ->

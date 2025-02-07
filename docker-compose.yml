@@ -19,3 +19,10 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     ports:
       - "9092:9092"
+
+  redis:
+    image: redis/redis-stack:latest
+    environment:
+        REDIS_ARGS: --save 20 1 --appendonly yes
+    ports:
+      - "6379:6379"

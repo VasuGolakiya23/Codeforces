@@ -1,10 +1,16 @@
 package org.dev.Entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import org.bson.codecs.pojo.annotations.BsonProperty;
+
 import java.util.List;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class BlogEntry {
 
-    private int id;
+    @BsonProperty("uniqueID")
+    private Long id;
     private String originalLocale;
     private int creationTimeSeconds;
     private String authorHandle;
@@ -16,11 +22,11 @@ public class BlogEntry {
     private List<String> tags;
     private int rating;
 
-    public int getId() {
+    public Long getId() {
         return id;
     }
 
-    public void setId(int id) {
+    public void setId(Long id) {
         this.id = id;
     }
 
