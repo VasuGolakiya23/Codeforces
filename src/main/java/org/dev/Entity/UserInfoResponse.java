@@ -1,8 +1,5 @@
 package org.dev.Entity;
 
-import io.vertx.ext.auth.User;
-import org.dev.Entity.UserInfo;
-
 import java.util.List;
 
 public class UserInfoResponse {

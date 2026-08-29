@@ -19,9 +19,11 @@ import org.dev.proxies.getUserInfo;
 import org.dev.apiSigGenerator.apiSigGenerator;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
+import org.jboss.logging.Logger;
 import org.dev.service.kafkaProducer;
 import org.dev.openSearch.openSearchService;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -30,6 +32,8 @@ import java.util.Map;
 @ApplicationScoped
 @Path("/")
 public class codeforcesResources {
+    private static final Logger LOG = Logger.getLogger(codeforcesResources.class);
+
     @ConfigProperty(name="codeforces.apiKey")
     String apiKey;
 
@@ -43,6 +47,12 @@ public class codeforcesResources {
     CodeforcesRepository codeforcesRepository;
 
     @Inject
+    ObjectMapper objectmapper;
+
+    @Inject
+    openSearchService openSearchService;
+
+    @Inject
     @RestClient
     getUserInfo getUserInfoProxy;
 
@@ -50,28 +60,27 @@ public class codeforcesResources {
     @Path("user-info/{handles}")
     @Consumes(MediaType.APPLICATION_JSON)
     public Response fetchUserInfo(@PathParam("handles") String handles) {
-        long time = System.currentTimeMillis() / 1000;
+        long time = Instant.now().getEpochSecond();
         Map<String, String> params = new HashMap<>();
         params.put("handles", handles);
-        String apiSig = apiSigGenerator.createApiSig("user.info", params);
-        System.out.println("checking from fetchUserInfo function");
+        String apiSig = apiSigGenerator.createApiSig("user.info", params, time);
 
         try {
             UserInfoResponse userInfoResp = getUserInfoProxy.getUserInfoAPI(handles, apiKey, time, apiSig);
-            System.out.println(userInfoResp);
             userInfoResp.getResult().forEach(user -> {
-                if(codeforcesRepository.userInfoExists(user.getHandle())) {
-                    System.out.println("User already exists in the database: " + user.getHandle());
-                }
-                else {
-                    System.out.println(user.getHandle());
-                    System.out.println("Sending UserInfo to Kafka");
+                if (codeforcesRepository.userInfoExists(user.getHandle())) {
+                    LOG.debugf("UserInfo already stored, skipping: %s", user.getHandle());
+                } else {
+                    LOG.debugf("Sending UserInfo to Kafka: %s", user.getHandle());
                     kafkaProducer.sendUserInfo(user);
                 }
             });
             return Response.ok(userInfoResp).build();
         } catch (Exception e) {
-            throw new RuntimeException("Failed to fetch user information: " + e.getMessage());
+            LOG.errorf(e, "Failed to fetch user information for handles=%s", handles);
+            return Response.status(Response.Status.BAD_GATEWAY)
+                    .entity(Map.of("error", "Failed to fetch user information"))
+                    .build();
         }
     }
 
@@ -83,81 +92,63 @@ public class codeforcesResources {
     @Path("user-blogs/{handle}")
     @Consumes(MediaType.APPLICATION_JSON)
     public Response fetchUserBlogs(@PathParam("handle") String handle) {
-        long time = System.currentTimeMillis() / 1000;
+        long time = Instant.now().getEpochSecond();
         Map<String, String> params = new HashMap<>();
         params.put("handle", handle);
-        String apiSig = apiSigGenerator.createApiSig("user.blogEntries", params);
-        System.out.println("checking from fetchUserBlog function");
+        String apiSig = apiSigGenerator.createApiSig("user.blogEntries", params, time);
 
         try {
             BlogEntryResponse blogEntryResp = getUserBlogsProxy.getUserBlogsAPI(handle, apiKey, time, apiSig);
-            System.out.println(blogEntryResp);
             blogEntryResp.getResult().forEach(blog -> {
-                if(codeforcesRepository.blogEntriesExists(blog.getAuthorHandle())) {
-                    System.out.println("Blogs of this user already exists in the database: " + blog.getAuthorHandle());
-                }
-                else {
-                    System.out.println(blog.getAuthorHandle());
-                    System.out.println("Sending BlogEntry to kafka");
+                if (codeforcesRepository.blogEntryExists(blog.getId())) {
+                    LOG.debugf("BlogEntry already stored, skipping: %s", blog.getId());
+                } else {
+                    LOG.debugf("Sending BlogEntry to Kafka: %s", blog.getId());
                     kafkaProducer.sendBlogEntry(blog);
                 }
             });
             return Response.ok(blogEntryResp).build();
         } catch (Exception e) {
-            throw new RuntimeException("Failed to fetch user blogs: " + e.getMessage());
+            LOG.errorf(e, "Failed to fetch user blogs for handle=%s", handle);
+            return Response.status(Response.Status.BAD_GATEWAY)
+                    .entity(Map.of("error", "Failed to fetch user blogs"))
+                    .build();
         }
     }
-
-    @Inject
-    ObjectMapper objectmapper;
-
-    @Inject
-    openSearchService serviceClientUserInfo;
 
     @GET
     @Path("/searchOnUserInfo/{query}")
     @Consumes(MediaType.APPLICATION_JSON)
-    public Response searchOnUserInfo(@PathParam("query") String query){
-        List<UserInfo> finalData = new ArrayList<>();
+    public Response searchOnUserInfo(@PathParam("query") String query) {
         try {
-            List<String> openSearchResult = serviceClientUserInfo.searchQueryUserInfo(query);
-            openSearchResult.forEach(child->{
-                try {
-                    UserInfo data = objectmapper.readValue(child, UserInfo.class);
-                    finalData.add(data);
-                }
-                catch (Exception e) {
-                    throw new RuntimeException("Failed to search user info data", e);
-                }
-            });
+            List<UserInfo> finalData = new ArrayList<>();
+            for (String hit : openSearchService.searchQueryUserInfo(query)) {
+                finalData.add(objectmapper.readValue(hit, UserInfo.class));
+            }
             return Response.ok(finalData).build();
         } catch (Exception e) {
-            return Response.ok("Error in searching the user info query: " + e.getMessage()).build();
+            LOG.errorf(e, "Failed to search user info for query=%s", query);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Map.of("error", "Failed to search user info"))
+                    .build();
         }
     }
-
-    @Inject
-    openSearchService serviceClientBlogEntry;
 
     @GET
     @Path("/searchOnBlogEntry/{query}")
     @Consumes(MediaType.APPLICATION_JSON)
-    public Response searchOnBlogEntry(@PathParam("query") String query){
-        List<BlogEntry> finalData = new ArrayList<>();
+    public Response searchOnBlogEntry(@PathParam("query") String query) {
         try {
-            List<String> openSearchResult = serviceClientBlogEntry.searchQueryBlogEntry(query);
-            openSearchResult.forEach(child->{
-                try {
-                    BlogEntry data = objectmapper.readValue(child, BlogEntry.class);
-                    finalData.add(data);
-                }
-                catch (Exception e) {
-                    throw new RuntimeException("Failed to search blog entry data", e);
-                }
-            });
+            List<BlogEntry> finalData = new ArrayList<>();
+            for (String hit : openSearchService.searchQueryBlogEntry(query)) {
+                finalData.add(objectmapper.readValue(hit, BlogEntry.class));
+            }
             return Response.ok(finalData).build();
         } catch (Exception e) {
-            return Response.ok("Error in searching the blog entry query: " + e.getMessage()).build();
+            LOG.errorf(e, "Failed to search blog entries for query=%s", query);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Map.of("error", "Failed to search blog entries"))
+                    .build();
         }
     }
 }

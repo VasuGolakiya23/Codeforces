@@ -1,63 +1,99 @@
-# codeforces
+# Codeforces
 
-This project uses Quarkus, the Supersonic Subatomic Java Framework.
+A Quarkus service that pulls user profiles and blog entries from the
+[Codeforces API](https://codeforces.com/apiHelp), fans them out through Kafka, and
+persists them to MongoDB while indexing them in OpenSearch for full-text search.
 
-If you want to learn more about Quarkus, please visit its website: <https://quarkus.io/>.
+## How it works
 
-## Running the application in dev mode
+```
+GET /user-info/{handles}          Codeforces API
+GET /user-blogs/{handle}     ->        |
+                                       v
+                              Kafka (codeforcesUserInfo / codeforcesBlogEntry)
+                                       |
+                                       v
+                              kafkaConsumer  ->  MongoDB  (source of truth)
+                                       |      ->  OpenSearch (search index)
+                                       v
+                              Redis (per-partition processed offsets)
 
-You can run your application in dev mode that enables live coding using:
-
-```shell script
-./gradlew quarkusDev
+GET /searchOnUserInfo/{query}     queries the OpenSearch indexes
+GET /searchOnBlogEntry/{query}
 ```
 
-> **_NOTE:_**  Quarkus now ships with a Dev UI, which is available in dev mode only at <http://localhost:8080/q/dev/>.
+Records already present in MongoDB are skipped rather than re-published, so repeated
+fetches for the same handle are cheap.
 
-## Packaging and running the application
+Consumer offsets are tracked in Redis by `kafkaConsumer` and replayed by
+`customRebalanceListener` on partition assignment, so the consumers resume from the
+last record they actually finished processing rather than from Kafka's committed offsets.
 
-The application can be packaged using:
+## Configuration
+
+Credentials and service addresses come from the environment. Copy the template and fill
+it in:
+
+```shell script
+cp .env.example .env
+```
+
+`CODEFORCES_API_KEY` and `CODEFORCES_API_SECRET` are required — generate them at
+<https://codeforces.com/settings/api>. Never commit the filled-in `.env`.
+
+The defaults in `application.properties` point at `localhost`, which is what you want for
+a local run; `docker-compose.yml` overrides them with the in-network hostnames.
+
+## Running with Docker Compose
+
+Brings up the app plus Kafka, Zookeeper, MongoDB, Redis and OpenSearch:
 
 ```shell script
 ./gradlew build
+docker compose up --build
 ```
 
-It produces the `quarkus-run.jar` file in the `build/quarkus-app/` directory.
-Be aware that it’s not an _über-jar_ as the dependencies are copied into the `build/quarkus-app/lib/` directory.
+The app is served on <http://localhost:8080>. Compose waits for each backing service to
+pass its health check before starting the app.
 
-The application is now runnable using `java -jar build/quarkus-app/quarkus-run.jar`.
+## Running locally
 
-If you want to build an _über-jar_, execute the following command:
+Start the backing services and run the app against them on the host:
 
 ```shell script
-./gradlew build -Dquarkus.package.jar.type=uber-jar
+docker compose up -d mongodb redis opensearch kafka zookeeper
+./gradlew quarkusDev
 ```
 
-The application, packaged as an _über-jar_, is now runnable using `java -jar build/*-runner.jar`.
+Kafka advertises two listeners: `kafka:9092` inside the compose network, and
+`localhost:29092` for clients on the host. `.env.example` already points at the latter,
+which is what a local run needs — the in-network address is not resolvable from the host.
 
-## Creating a native executable
+Dev mode serves the app on <http://localhost:3000> with the Dev UI at
+<http://localhost:3000/q/dev/>.
 
-You can create a native executable using:
+## Endpoints
+
+| Method | Path                          | Description                                          |
+| ------ | ----------------------------- | ---------------------------------------------------- |
+| GET    | `/user-info/{handles}`        | Fetch profiles (semicolon-separated handles)         |
+| GET    | `/user-blogs/{handle}`        | Fetch a user's blog entries                          |
+| GET    | `/searchOnUserInfo/{query}`   | Full-text search over indexed profiles               |
+| GET    | `/searchOnBlogEntry/{query}`  | Full-text search over indexed blog entries           |
+| GET    | `/q/health`                   | Liveness / readiness                                 |
+
+## Tests
 
 ```shell script
-./gradlew build -Dquarkus.native.enabled=true
+./gradlew test
 ```
 
-Or, if you don't have GraalVM installed, you can run the native executable build in a container using:
+## Packaging
 
 ```shell script
-./gradlew build -Dquarkus.native.enabled=true -Dquarkus.native.container-build=true
+./gradlew build
+java -jar build/quarkus-app/quarkus-run.jar
 ```
 
-You can then execute your native executable with: `./build/codeforces-1.0-SNAPSHOT-runner`
-
-If you want to learn more about building native executables, please consult <https://quarkus.io/guides/gradle-tooling>.
-
-## Provided Code
-
-### REST
-
-Easily start your REST Web Services
-
-[Related guide section...](https://quarkus.io/guides/getting-started-reactive#reactive-jax-rs-resources)
-# Codeforces
+For an über-jar or a native executable, see the
+[Quarkus Gradle tooling guide](https://quarkus.io/guides/gradle-tooling).

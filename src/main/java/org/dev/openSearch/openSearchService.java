@@ -6,6 +6,7 @@ import jakarta.inject.Inject;
 
 import org.dev.Entity.BlogEntry;
 import org.dev.Entity.UserInfo;
+import org.jboss.logging.Logger;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.search.SearchRequest;
@@ -20,107 +21,97 @@ import org.opensearch.search.builder.SearchSourceBuilder;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.logging.Logger;
 
 @ApplicationScoped
 public class openSearchService {
-    private static final Logger logger = Logger.getLogger(openSearchService.class.getName());
-
-    @Inject
-    openSearchClient openSearchClientUserInfo;
+    private static final Logger LOG = Logger.getLogger(openSearchService.class);
 
     private static final String INDEX_NAME_UserInfo = "user_info";
+    private static final String INDEX_NAME_BlogEntry = "blog_entry";
+    private static final int MAX_SEARCH_RESULTS = 100;
+
+    private static final String LUCENE_RESERVED = "+-&|!(){}[]^\"~*?:\\/";
+
+    @Inject
+    openSearchClient openSearchClient;
+
+    @Inject
+    ObjectMapper objectMapper;
 
     public void createIndexUserInfo(UserInfo data) {
         try {
-            RestHighLevelClient client = openSearchClientUserInfo.getClient();
-            ObjectMapper objectMapper = new ObjectMapper();
             String json = objectMapper.writeValueAsString(data);
-            logger.info("Creating index for: " + data.getHandle());
+            LOG.debugf("Indexing UserInfo: %s", data.getHandle());
 
-            // Create index for the data
             IndexRequest request = new IndexRequest(INDEX_NAME_UserInfo)
                     .id(data.getHandle())
                     .source(json, XContentType.JSON);
 
-            IndexResponse response = client.index(request, RequestOptions.DEFAULT);
-            System.out.println("UserInfo Indexed Successfully " + response.getId());
+            IndexResponse response = openSearchClient.getClient().index(request, RequestOptions.DEFAULT);
+            LOG.debugf("UserInfo indexed successfully: %s", response.getId());
         } catch (Exception e) {
-            logger.severe("Error in creating index: " + e.getMessage());
-            throw new RuntimeException(e);
+            LOG.errorf(e, "Failed to index UserInfo: %s", data.getHandle());
+            throw new RuntimeException("Failed to index UserInfo", e);
         }
     }
-
-    public List<String> searchQueryUserInfo(String queryText) throws IOException {
-        RestHighLevelClient client = openSearchClientUserInfo.getClient();
-
-        //Create the search request for particular INDEX
-        SearchRequest request = new SearchRequest(INDEX_NAME_UserInfo);
-
-        //Creating source builder for creating query
-        SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
-        sourceBuilder.query(QueryBuilders.queryStringQuery("*" + queryText + "*"));
-
-        sourceBuilder.size(100);
-        request.source(sourceBuilder);
-
-        SearchResponse response = client.search(request, RequestOptions.DEFAULT);
-
-        //Extracting the result from the response
-        List<String> results = new ArrayList<>();
-        for (SearchHit hit : response.getHits().getHits()) {
-            results.add(hit.getSourceAsString()); // Returns the full document as JSON
-        }
-        System.out.println(results);
-        return results;
-    }
-
-    @Inject
-    openSearchClient openSearchClientBlogEntry;
-
-    private static final String INDEX_NAME_BlogEntry = "blog_entry";
 
     public void createIndexBlogEntry(BlogEntry data) {
         try {
-            RestHighLevelClient client = openSearchClientBlogEntry.getClient();
-            ObjectMapper objectMapper = new ObjectMapper();
+            if (data.getId() == null) {
+                throw new IllegalArgumentException("BlogEntry has no id, refusing to index it");
+            }
             String json = objectMapper.writeValueAsString(data);
-            logger.info("Creating index for: " + data.getId());
+            LOG.debugf("Indexing BlogEntry: %s", data.getId());
 
-            // Create index for the data
             IndexRequest request = new IndexRequest(INDEX_NAME_BlogEntry)
                     .id(data.getId().toString())
                     .source(json, XContentType.JSON);
 
-            IndexResponse response = client.index(request, RequestOptions.DEFAULT);
-            System.out.println("BlogEntry Indexed Successfully " + response.getId());
+            IndexResponse response = openSearchClient.getClient().index(request, RequestOptions.DEFAULT);
+            LOG.debugf("BlogEntry indexed successfully: %s", response.getId());
         } catch (Exception e) {
-            logger.severe("Error in creating index: " + e.getMessage());
-            throw new RuntimeException(e);
+            LOG.errorf(e, "Failed to index BlogEntry: %s", data.getId());
+            throw new RuntimeException("Failed to index BlogEntry", e);
         }
     }
 
+    public List<String> searchQueryUserInfo(String queryText) throws IOException {
+        return search(INDEX_NAME_UserInfo, queryText);
+    }
+
     public List<String> searchQueryBlogEntry(String queryText) throws IOException {
-        RestHighLevelClient client = openSearchClientBlogEntry.getClient();
+        return search(INDEX_NAME_BlogEntry, queryText);
+    }
 
-        //Create the search request for particular INDEX
-        SearchRequest request = new SearchRequest(INDEX_NAME_BlogEntry);
+    private List<String> search(String index, String queryText) throws IOException {
+        SearchRequest request = new SearchRequest(index);
 
-        //Creating source builder for creating query
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
-        sourceBuilder.query(QueryBuilders.queryStringQuery("*" + queryText + "*"));
-
-        sourceBuilder.size(100);
+        sourceBuilder.query(QueryBuilders.queryStringQuery("*" + escapeLucene(queryText) + "*"));
+        sourceBuilder.size(MAX_SEARCH_RESULTS);
         request.source(sourceBuilder);
 
-        SearchResponse response = client.search(request, RequestOptions.DEFAULT);
+        SearchResponse response = openSearchClient.getClient().search(request, RequestOptions.DEFAULT);
 
-        //Extracting the result from the response
         List<String> results = new ArrayList<>();
         for (SearchHit hit : response.getHits().getHits()) {
-            results.add(hit.getSourceAsString()); // Returns the full document as JSON
+            results.add(hit.getSourceAsString());
         }
-        System.out.println(results);
+        LOG.debugf("Search on %s for '%s' returned %d hit(s)", index, queryText, results.size());
         return results;
+    }
+
+    private static String escapeLucene(String input) {
+        if (input == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(input.length());
+        for (char c : input.toCharArray()) {
+            if (LUCENE_RESERVED.indexOf(c) >= 0) {
+                sb.append('\\');
+            }
+            sb.append(c);
+        }
+        return sb.toString();
     }
 }

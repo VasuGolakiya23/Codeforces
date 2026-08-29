@@ -7,7 +7,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -22,11 +21,8 @@ public class apiSigGenerator {
     @ConfigProperty(name="codeforces.randomString")
     String randomString;
 
-    public String createApiSig(String methodName, Map<String, String> params) {
-        long time = Instant.now().getEpochSecond();
-
+    public String createApiSig(String methodName, Map<String, String> params, long time) {
         TreeMap<String, String> sortedParams = new TreeMap<>(params);
-        System.out.println(sortedParams);
         sortedParams.put("apiKey", apiKey);
         sortedParams.put("time", String.valueOf(time));
 

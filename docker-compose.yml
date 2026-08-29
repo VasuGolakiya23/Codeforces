@@ -1,48 +1,68 @@
-version: '3.8'
-
 services:
-    # Codeforces Application
   codeforces:
     build:
       context: .
       dockerfile: src/main/docker/Dockerfile.jvm
     image: codeforces
+    container_name: codeforces
     depends_on:
-      - mongodb
-      - redis
-      - opensearch
-      - kafka
-      - zookeeper
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      CODEFORCES_API_KEY: ${CODEFORCES_API_KEY:?set CODEFORCES_API_KEY in .env}
+      CODEFORCES_API_SECRET: ${CODEFORCES_API_SECRET:?set CODEFORCES_API_SECRET in .env}
+      CODEFORCES_RANDOM_STRING: ${CODEFORCES_RANDOM_STRING:-123456}
+      HTTP_CORS_ORIGINS: ${HTTP_CORS_ORIGINS:-http://localhost:8080}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MONGODB_CONNECTION_STRING: mongodb://mongodb:27017
+      OPENSEARCH_HOST: opensearch
+      REDIS_HOSTS: redis://redis:6379
     ports:
       - "8080:3000"
 
-  # Zookeeper
   zookeeper:
     image: confluentinc/cp-zookeeper:latest
     container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_OPTS: -Dzookeeper.4lw.commands.whitelist=srvr,ruok
     ports:
       - "2181:2181"
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc -w 2 localhost 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
-  # Kafka Message Broker
   kafka:
     image: confluentinc/cp-kafka:latest
     container_name: kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092         # Use if running docker also in docker-compose
-#      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092      # Use if running docker outside docker-compose (locally)
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     ports:
-      - "9092:9092"
+      - "29092:29092"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
 
-  # MongoDB Database
   mongodb:
     image: mongo:latest
     container_name: mongodb
@@ -50,8 +70,12 @@ services:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
-  # Redis for Caching & Offsets
   redis:
     image: redis/redis-stack:latest
     container_name: redis
@@ -59,17 +83,34 @@ services:
       REDIS_ARGS: --save 20 1 --appendonly yes
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
-  # OpenSearch
   opensearch:
     image: opensearchproject/opensearch:2.9.0
     container_name: opensearch
     environment:
       discovery.type: single-node
-      DISABLE_SECURITY_PLUGIN: true
+      DISABLE_SECURITY_PLUGIN: "true"
     ports:
       - "9200:9200"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
 volumes:
   mongodb_data:
+    driver: local
+  redis_data:
+    driver: local
+  opensearch_data:
     driver: local

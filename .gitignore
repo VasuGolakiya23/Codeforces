@@ -35,6 +35,9 @@ nb-configuration.xml
 # Local environment
 .env
 
+# Redis snapshot written when running redis locally
+dump.rdb
+
 # Plugin directory
 /.quarkus/cli/plugins/
 # TLS Certificates

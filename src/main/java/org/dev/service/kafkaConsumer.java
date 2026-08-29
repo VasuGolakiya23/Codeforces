@@ -1,22 +1,24 @@
 package org.dev.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.smallrye.common.annotation.Blocking;
 import io.smallrye.reactive.messaging.kafka.IncomingKafkaRecord;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.transaction.Transactional;
 import org.dev.Entity.BlogEntry;
 import org.dev.Entity.UserInfo;
 import org.dev.Repository.CodeforcesRepository;
-import org.dev.openSearch.openSearchClient;
 import org.eclipse.microprofile.reactive.messaging.Incoming;
 import org.apache.kafka.common.TopicPartition;
 import org.dev.openSearch.openSearchService;
+import org.jboss.logging.Logger;
 
 import java.util.concurrent.CompletionStage;
 
 @ApplicationScoped
 public class kafkaConsumer {
+    private static final Logger LOG = Logger.getLogger(kafkaConsumer.class);
+
     @Inject
     CodeforcesRepository codeforcesRepository;
 
@@ -24,65 +26,51 @@ public class kafkaConsumer {
     RedisService redisService;
 
     @Inject
-    openSearchClient openSearchClient;
-
-    @Inject
     openSearchService openSearchService;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    @Inject
+    ObjectMapper objectMapper;
 
     @Incoming("UserInfoIn")
-    @Transactional
+    @Blocking
     public CompletionStage<Void> consumeUserInfo(IncomingKafkaRecord<String, String> record) {
         try {
-            String key = record.getKey();
-            String value = record.getPayload();
-            UserInfo deserialisedMessage = objectMapper.readValue(value, UserInfo.class);
-            String handleName=deserialisedMessage.getHandle();
+            UserInfo deserialisedMessage = objectMapper.readValue(record.getPayload(), UserInfo.class);
+            String handleName = deserialisedMessage.getHandle();
             codeforcesRepository.addUserInfo(deserialisedMessage);
             openSearchService.createIndexUserInfo(deserialisedMessage);
             TopicPartition partition = new TopicPartition(record.getTopic(), record.getPartition());
             updateProcessedOffset(partition, record.getOffset());
-            return record.ack().thenRun(() -> {
-                System.out.println("UserInfo processed & acknowledged: " + handleName);
-            });
+            return record.ack().thenRun(() -> LOG.debugf("UserInfo processed & acknowledged: %s", handleName));
         } catch (Exception e) {
-            System.out.println("Error in consuming UserInfo: " + e.getMessage());
+            LOG.errorf(e, "Error consuming UserInfo at %s-%d offset %d",
+                    record.getTopic(), record.getPartition(), record.getOffset());
             return record.nack(e);
         }
     }
 
     @Incoming("BlogEntryIn")
-    @Transactional
+    @Blocking
     public CompletionStage<Void> consumeBlogEntry(IncomingKafkaRecord<String, String> record) {
         try {
-            String key = record.getKey();
-            String value = record.getPayload();
-            BlogEntry deserializedMessage = objectMapper.readValue(value, BlogEntry.class);
+            BlogEntry deserializedMessage = objectMapper.readValue(record.getPayload(), BlogEntry.class);
             String blogTitle = deserializedMessage.getTitle();
-            System.out.println("deserializedMessage: ");
-            System.out.println(deserializedMessage.getId());
             codeforcesRepository.addBlogEntry(deserializedMessage);
             openSearchService.createIndexBlogEntry(deserializedMessage);
             TopicPartition partition = new TopicPartition(record.getTopic(), record.getPartition());
             updateProcessedOffset(partition, record.getOffset());
-            return record.ack().thenRun(() ->
-                    System.out.println("BlogEntry Processed & Acknowledged: " + blogTitle)
-            );
+            return record.ack().thenRun(() -> LOG.debugf("BlogEntry processed & acknowledged: %s", blogTitle));
         } catch (Exception e) {
-            System.out.println("Error in consuming BlogEntry: " + e.getMessage());
+            LOG.errorf(e, "Error consuming BlogEntry at %s-%d offset %d",
+                    record.getTopic(), record.getPartition(), record.getOffset());
             return record.nack(e);
         }
     }
 
     public void updateProcessedOffset(TopicPartition topicPartition, long offset) {
-        String topic=topicPartition.topic();
-        String partition=String.valueOf(topicPartition.partition());
-        Long redisOffset= 0L;
-        if(redisService.checkHashKey(topic, partition)){
-            redisOffset = redisService.getHashKey(topic, partition);
-        }
+        String topic = topicPartition.topic();
+        String partition = String.valueOf(topicPartition.partition());
         redisService.setHashKey(topic, partition, String.valueOf(offset));
-        System.out.println("The topic is "+topic+", the partition is "+partition+", the current message offset is "+offset+ " and the redis offset was "+redisOffset);
+        LOG.debugf("Stored offset %d for %s-%s", offset, topic, partition);
     }
 }
